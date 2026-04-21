@@ -1,0 +1,183 @@
+# =============================================================
+# docker-compose.full.yml  —  Mini Food Ordering System
+# =============================================================
+# Chiến lược DB:
+#   - 1 PostgreSQL instance, 3 logical databases:
+#       food_user_db    → user-service (Node/Prisma)
+#       food_service_db → food-service (Spring JPA)
+#       order_service_db→ order-service (Spring JPA)
+#   - payment-db: MariaDB riêng (khác vendor, tách biệt theo yêu cầu bài)
+#
+# Triển khai LAN: chỉ cần thay SPRING_DATASOURCE_URL / DATABASE_URL
+# trỏ đúng IP máy chạy DB, không cần sửa code.
+# =============================================================
+
+services:
+
+  # -----------------------------------------------------------
+  # DATABASE TIER
+  # -----------------------------------------------------------
+  postgres:
+    image: postgres:18.1-alpine
+    container_name: food-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: food_user_db          # DB mặc định (user-service)
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro   # tạo food_service_db & order_service_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d food_user_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  payment-db:
+    image: mariadb:11.4
+    container_name: payment-db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: sapassword
+      MARIADB_DATABASE: payment
+    ports:
+      - "3306:3306"
+    volumes:
+      - payment_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-psapassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # -----------------------------------------------------------
+  # APPLICATION TIER
+  # -----------------------------------------------------------
+  # -----------------------------------------------------------
+  # APPLICATION TIER
+  # -----------------------------------------------------------
+  user-service:
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    container_name: user-service
+    restart: unless-stopped
+    volumes:
+      - ./user-service:/app
+      - /app/node_modules
+    command: sh -c "npx prisma migrate deploy && npx prisma db seed && npm run dev"
+    environment:
+      PORT: "8081"
+      SERVICE_IP: 0.0.0.0
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/food_user_db?schema=public
+      JWT_SECRET: super-secret-key
+      ALLOWED_ORIGIN: "*"
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  food-service:
+    # Sử dụng image maven trực tiếp để hỗ trợ hot-reload (spring-boot:run)
+    image: maven:3.9.9-eclipse-temurin-17
+    container_name: food-service
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./food-service:/app
+      - maven_m2:/root/.m2
+    command: sh -c "./mvnw spring-boot:run -Dspring-boot.run.profiles=dev"
+    environment:
+      SERVER_PORT: "8082"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/food_service_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  order-service:
+    image: maven:3.9.9-eclipse-temurin-17
+    container_name: order-service
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./order-service:/app
+      - maven_m2:/root/.m2
+    command: sh -c "./mvnw spring-boot:run -Dspring-boot.run.profiles=dev"
+    environment:
+      SERVER_PORT: "8083"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/order_service_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      FOOD_SERVICE_URL: http://food-service:8082
+      USER_SERVICE_URL: http://user-service:8081
+    ports:
+      - "8083:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      food-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+
+  payment-service:
+    image: maven:3.9.9-eclipse-temurin-17
+    container_name: payment-service
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./payment-service:/app
+      - maven_m2:/root/.m2
+    command: sh -c "./mvnw spring-boot:run -Dspring-boot.run.profiles=dev"
+    environment:
+      SERVER_PORT: "8084"
+      ORDER_SERVICE_URL: http://order-service:8083
+      SPRING_DATASOURCE_URL: jdbc:mariadb://payment-db:3306/payment
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: sapassword
+    ports:
+      - "8084:8084"
+    depends_on:
+      payment-db:
+        condition: service_healthy
+      order-service:
+        condition: service_started
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    restart: unless-stopped
+    volumes:
+      - ./api-gateway:/app
+      - /app/node_modules
+    command: npm run dev
+    environment:
+      PORT: "8080"
+      SERVICE_IP: 0.0.0.0
+      ALLOWED_ORIGIN: "*"
+      USER_SERVICE_URL: http://user-service:8081
+      FOOD_SERVICE_URL: http://food-service:8082
+      ORDER_SERVICE_URL: http://order-service:8083
+      PAYMENT_SERVICE_URL: http://payment-service:8084
+    ports:
+      - "8080:8080"
+    depends_on:
+      - user-service
+      - food-service
+      - order-service
+      - payment-service
+
+volumes:
+  postgres_data:
+  payment_db_data:
+  maven_m2:
