@@ -1,0 +1,47 @@
+{
+  "name": "tuan7_bai7",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "node stress-test.js",
+    "seed": "npx ts-node --project tsconfig.json --transpile-only data-pump/src/seed.ts",
+    "dev": "concurrently \"npm run dev -w product-service\" \"npm run dev -w cart-service\" \"npm run dev -w order-service\" \"npm run dev -w inventory-service\" \"npm run dev -w data-pump\"",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "docker:rebuild": "docker compose down && docker compose build --no-cache && docker compose up -d"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "description": "",
+  "devDependencies": {
+    "@types/amqplib": "^0.10.8",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.6.0",
+    "@types/uuid": "^10.0.0",
+    "concurrently": "^9.2.1",
+    "prisma": "^5.22.0",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^6.0.3"
+  },
+  "workspaces": [
+    "product-service",
+    "cart-service",
+    "order-service",
+    "inventory-service",
+    "data-pump"
+  ],
+  "dependencies": {
+    "amqplib": "^1.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "ioredis": "^5.10.1",
+    "uuid": "^14.0.0"
+  }
+}

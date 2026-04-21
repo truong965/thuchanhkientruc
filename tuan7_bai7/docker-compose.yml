@@ -1,0 +1,218 @@
+version: '3.8'
+
+# ============================================================
+# Flash Sale — Space-Based Architecture
+# Mô hình triển khai: Đồng bộ hóa toàn bộ qua file .env gốc.
+# Để chạy đa máy chủ (Multi-machine LAN):
+#   1. Máy A: Chạy Postgres, Redis, RabbitMQ
+#   2. Máy B, C...: Chạy Microservices
+#   3. Chỉ cần sửa file .env ở thư mục gốc để map đúng IP
+# ============================================================
+
+services:
+  # ── Infrastructure ───────────────────────────────────────────
+  postgres:
+    image: postgres:18.1-alpine
+    container_name: flashsale_postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: adminpassword
+      POSTGRES_DB: flashsale_db
+    ports:
+      - "0.0.0.0:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d flashsale_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lan_network
+
+  rabbitmq:
+    image: rabbitmq:4.2.5-management-alpine
+    container_name: flashsale_rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: adminpassword
+    ports:
+      - "0.0.0.0:5672:5672"
+      - "0.0.0.0:15672:15672"
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_running"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - lan_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: flashsale_redis
+    ports:
+      - "0.0.0.0:6379:6379"
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lan_network
+
+  # ── PU1 — Product Service (port 8081) ────────────────────────
+  product-service:
+    build:
+      context: .
+      dockerfile: ./product-service/Dockerfile
+    container_name: flashsale_product
+    env_file: .env
+    environment:
+      PORT: 8081
+    ports:
+      - "0.0.0.0:8081:8081"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      - redis
+    restart: always
+    networks:
+      - lan_network
+
+  # ── PU2 — Cart Service (port 8082) ───────────────────────────
+  cart-service:
+    build:
+      context: .
+      dockerfile: ./cart-service/Dockerfile
+    container_name: flashsale_cart
+    env_file: .env
+    environment:
+      PORT: 8082
+    ports:
+      - "0.0.0.0:8082:8082"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      - redis
+    restart: always
+    networks:
+      - lan_network
+
+  # ── PU3 — Order Service (port 8083) ──────────────────────────
+  order-service:
+    build:
+      context: .
+      dockerfile: ./order-service/Dockerfile
+    container_name: flashsale_order
+    env_file: .env
+    environment:
+      PORT: 8083
+      # Gọi Inventory Service (Cấu hình linh hoạt qua .env)
+      INVENTORY_SERVICE_URL: ${INVENTORY_SERVICE_INTERNAL_URL}
+    ports:
+      - "0.0.0.0:8083:8083"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      - redis
+      - rabbitmq
+      - inventory-service
+    restart: always
+    networks:
+      - lan_network
+
+  # ── PU4 — Inventory Service (port 8084) ──────────────────────
+  inventory-service:
+    build:
+      context: .
+      dockerfile: ./inventory-service/Dockerfile
+    container_name: flashsale_inventory
+    env_file: .env
+    environment:
+      PORT: 8084
+    ports:
+      - "0.0.0.0:8084:8084"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      - redis
+    restart: always
+    networks:
+      - lan_network
+
+  # ── Data Pump (background worker) ─────────────────────────────
+  data-pump:
+    build:
+      context: .
+      dockerfile: ./data-pump/Dockerfile
+    container_name: flashsale_datapump
+    env_file: .env
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+    networks:
+      - lan_network
+
+  # ── DB Setup & Seeding (Tự động chạy 1 lần khi up) ────────────
+  db-seed:
+    build:
+      context: .
+      dockerfile: ./data-pump/Dockerfile
+    container_name: flashsale_db_seed
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "../node_modules/.bin/prisma db push --schema prisma/schema.prisma &&
+             ../node_modules/.bin/ts-node --project ../tsconfig.json src/seed.ts"
+    restart: on-failure
+    networks:
+      - lan_network
+
+  # ── Frontend (port 3000) ──────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_PRODUCT_SERVICE_URL: ${VITE_PRODUCT_SERVICE_URL}
+        VITE_CART_SERVICE_URL: ${VITE_CART_SERVICE_URL}
+        VITE_ORDER_SERVICE_URL: ${VITE_ORDER_SERVICE_URL}
+        VITE_INVENTORY_SERVICE_URL: ${VITE_INVENTORY_SERVICE_URL}
+    container_name: flashsale_frontend
+    ports:
+      - "0.0.0.0:3000:80"
+    depends_on:
+      - product-service
+      - cart-service
+      - order-service
+      - inventory-service
+    restart: always
+    networks:
+      - lan_network
+
+networks:
+  lan_network:
+    driver: bridge
+
+volumes:
+  pgdata:
