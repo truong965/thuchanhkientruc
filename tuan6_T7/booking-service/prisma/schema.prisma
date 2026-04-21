@@ -1,0 +1,20 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Booking {
+  id         Int      @id @default(autoincrement())
+  userId     String
+  userName   String
+  movieId    Int
+  quantity   Int
+  totalPrice Float
+  status     String   @default("PENDING") // PENDING, SUCCESS, FAILED
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}

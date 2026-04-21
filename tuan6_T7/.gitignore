@@ -1,0 +1,50 @@
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Build artifacts
+dist/
+build/
+.next/
+out/
+.docusaurus/
+.cache/
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Environment files
+# .env <-- Đã comment để cho phép track file .env theo yêu cầu của bạn
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Prisma
+/prisma/migrations/
+# Nếu bạn muốn ignore SQLite DB (nếu có dùng)
+*.db
+*.db-journal
+
+# Logs
+logs
+*.log
+
+# Temporary files
+tmp/
+temp/

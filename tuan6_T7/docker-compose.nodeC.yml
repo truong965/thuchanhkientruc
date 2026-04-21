@@ -1,0 +1,9 @@
+services:
+  payment-notification-service:
+    build: ./payment-notification-service
+    container_name: payment-service-nodeC
+    environment:
+      AMQP_URL: ${AMQP_URL}
+      PORT: 8004
+    ports:
+      - "8004:8004"

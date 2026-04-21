@@ -1,0 +1,21 @@
+services:
+  movie-service:
+    build: ./movie-service
+    container_name: movie-service-nodeB
+    environment:
+      DATABASE_URL: ${DATABASE_URL_MOVIE}
+      AMQP_URL: ${AMQP_URL}
+      PORT: 8002
+    ports:
+      - "8002:8002"
+
+  booking-service:
+    build: ./booking-service
+    container_name: booking-service-nodeB
+    environment:
+      DATABASE_URL: ${DATABASE_URL_BOOKING}
+      AMQP_URL: ${AMQP_URL}
+      MOVIE_SERVICE_URL: ${MOVIE_SERVICE_URL}
+      PORT: 8003
+    ports:
+      - "8003:8003"
