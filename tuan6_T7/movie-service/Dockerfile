@@ -15,4 +15,4 @@ COPY . .
 
 EXPOSE 8002
 
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss && npm run seed && npm start"]
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss && npx prisma db seed && npm start"]
